@@ -1,43 +1,55 @@
+import os
+
 import pandas as pd
 
+
 def process_hate_speech_data(input_file, output_file):
-    # 1. 读取 TSV 文件
-    # sep='\t' 表示按制表符分割
-    # quoting=3 (csv.QUOTE_NONE) 有助于处理原始文本中复杂的引号
-    df = pd.read_csv(input_file, sep='\t', quoting=0)
+    SAMPLE_SIZE = 6000
+    RANDOM_SEED = 42
 
-    # 2. 定义映射和过滤逻辑
-    # 如果 class 是 explicit_hate 则跳过
-    df = df[df['class'] != 'explicit_hate'].copy()
+    df = pd.read_csv(input_file, sep="\t")
 
-    # 3. 转换标签
-    # implicit_hate -> hate, not_hate -> not_hate
+    df = df[df["class"] != "explicit_hate"].copy()
+
     label_map = {
-        'implicit_hate': 'hate',
-        'not_hate': 'not_hate'
+        "implicit_hate": "hate",
+        "not_hate": "not_hate",
     }
-    df['label'] = df['class'].map(label_map)
+    df["label"] = df["class"].map(label_map)
+    df = df.dropna(subset=["label"]).copy()
 
-    # 4. 准备最终的格式
-    # 重命名 post 为 text
-    df = df.rename(columns={'post': 'text'})
+    df = df.rename(columns={"post": "text"})
+    df["text"] = df["text"].astype(str)
+    df["text"] = df["text"].str.replace("\r", " ", regex=False)
+    df["text"] = df["text"].str.replace("\n", " ", regex=False)
+    df["text"] = df["text"].str.strip()
+    df = df[df["text"] != ""].copy()
 
-    # 5. 生成 ID (使用 iterrows 风格的 index)
-    # 重置索引并将其命名为 id
-    df.index.name = 'id'
-    df = df.reset_index()
+    not_hate_df = df[df["label"] == "not_hate"]
+    hate_df = df[df["label"] == "hate"]
 
-    # 6. 只保留要求的字段
-    final_df = df[['id', 'text', 'label']]
+    sample_size = min(SAMPLE_SIZE, len(df))
+    not_hate_sample_num = round(sample_size * len(not_hate_df) / len(df))
+    hate_sample_num = sample_size - not_hate_sample_num
 
-    # 7. 保存为 CSV
-    final_df.to_csv(output_file, index=False, encoding='utf-8-sig')
-    print(f"处理完成！文件已保存至: {output_file}")
-    print(f"统计信息:\n{final_df['label'].value_counts()}")
+    not_hate_sample = not_hate_df.sample(n=not_hate_sample_num, random_state=RANDOM_SEED)
+    hate_sample = hate_df.sample(n=hate_sample_num, random_state=RANDOM_SEED)
+    sampled_df = pd.concat([not_hate_sample, hate_sample])
+    sampled_df = sampled_df.sample(frac=1, random_state=RANDOM_SEED).reset_index(drop=True)
+
+    final_df = sampled_df[["text", "label"]].copy()
+    final_df.insert(0, "id", range(1, len(final_df) + 1))
+
+    final_df.to_csv(output_file, index=False, encoding="utf-8-sig")
+
+    print(f"Original labels:\n{df['label'].value_counts()}")
+    print(f"Sampled labels:\n{final_df['label'].value_counts()}")
+    print(f"Done. Saved {len(final_df)} rows to {output_file}")
+
 
 if __name__ == "__main__":
-    # 请确保文件名与你实际的文件名一致
-    input_tsv = r"./implicit_hate_v1_stg1_posts.tsv"
-    output_csv = "dataset_implicit.csv"
-    
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    input_tsv = os.path.join(BASE_DIR, "implicit_hate_v1_stg1_posts.tsv")
+    output_csv = os.path.join(BASE_DIR, "dataset_implicit.csv")
+
     process_hate_speech_data(input_tsv, output_csv)
